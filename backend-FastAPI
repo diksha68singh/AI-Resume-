@@ -1,0 +1,416 @@
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+import uuid
+import json
+import os
+import io
+import time
+import random
+from datetime import datetime
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+# Initialize FastAPI app
+app = FastAPI(title="Resume Editor API", version="1.0.0")
+
+# CORS middleware for React frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Data Models
+class Experience(BaseModel):
+    title: str = ""
+    company: str = ""
+    duration: str = ""
+    description: str = ""
+
+class Education(BaseModel):
+    degree: str = ""
+    school: str = ""
+    year: str = ""
+    description: str = ""
+
+class Resume(BaseModel):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    summary: str = ""
+    experience: List[Experience] = []
+    education: List[Education] = []
+    skills: List[str] = []
+
+class ResumeWithId(Resume):
+    id: str
+
+class EnhanceRequest(BaseModel):
+    section: str
+    content: str
+    index: Optional[int] = None
+
+class EnhanceResponse(BaseModel):
+    enhanced_content: str
+
+# In-memory storage (replace with database in production)
+resumes_db: Dict[str, Dict[str, Any]] = {}
+
+# Ensure temp directory exists
+os.makedirs("temp", exist_ok=True)
+
+# Mock AI Enhancement Service
+class MockAIEnhancer:
+    @staticmethod
+    def enhance_summary(content: str) -> str:
+        """Enhance professional summary with AI-like improvements"""
+        enhancements = [
+            "Proven track record of delivering high-quality results and exceeding expectations.",
+            "Strong leadership skills with experience managing cross-functional teams.",
+            "Excellent communication and problem-solving abilities.",
+            "Passionate about continuous learning and professional development.",
+            "Results-driven professional with a focus on innovation and efficiency."
+        ]
+        
+        if len(content) < 50:
+            return content + " " + random.choice(enhancements)
+        else:
+            return content + " " + random.choice(enhancements[:2])
+    
+    @staticmethod
+    def enhance_experience(content: str) -> str:
+        """Enhance experience description with AI-like improvements"""
+        enhancements = [
+            "Successfully implemented best practices and industry standards.",
+            "Collaborated effectively with stakeholders to achieve project objectives.",
+            "Demonstrated strong analytical and problem-solving skills.",
+            "Mentored junior team members and contributed to knowledge sharing.",
+            "Utilized cutting-edge technologies to optimize performance and efficiency."
+        ]
+        
+        return content + " " + random.choice(enhancements)
+    
+    @staticmethod
+    def enhance_education(content: str) -> str:
+        """Enhance education description with AI-like improvements"""
+        enhancements = [
+            "Relevant coursework included advanced topics in the field.",
+            "Participated in research projects and academic initiatives.",
+            "Developed strong foundation in theoretical and practical concepts.",
+            "Engaged in extracurricular activities and leadership opportunities.",
+            "Maintained excellent academic performance throughout the program."
+        ]
+        
+        return content + " " + random.choice(enhancements)
+
+# Resume parsing utility (mock implementation)
+def parse_resume_file(file_content: bytes, filename: str) -> Resume:
+    """
+    Mock resume parsing function. In production, use libraries like:
+    - python-docx for Word documents
+    - PyPDF2 or pdfplumber for PDF files
+    - spaCy or NLTK for text extraction and parsing
+    """
+    # Mock parsed data
+    mock_resume = Resume(
+        name="John Doe",
+        email="john.doe@email.com",
+        phone="+1 (555) 123-4567",
+        summary="Experienced professional with expertise in software development and project management.",
+        experience=[
+            Experience(
+                title="Senior Software Engineer",
+                company="Tech Solutions Inc.",
+                duration="2021 - Present",
+                description="Led development of scalable web applications using modern technologies."
+            ),
+            Experience(
+                title="Software Developer",
+                company="StartUp Co.",
+                duration="2019 - 2021",
+                description="Developed and maintained client-facing applications."
+            )
+        ],
+        education=[
+            Education(
+                degree="Bachelor of Science in Computer Science",
+                school="University of Technology",
+                year="2019",
+                description="Graduated with honors, focused on software engineering principles."
+            )
+        ],
+        skills=["Python", "JavaScript", "React", "Node.js", "SQL", "Git"]
+    )
+    
+    return mock_resume
+
+# PDF Generation utility
+def generate_pdf(resume: Resume) -> str:
+    """Generate PDF resume and return file path"""
+    filename = f"resume_{uuid.uuid4().hex[:8]}.pdf"
+    filepath = os.path.join("temp", filename)
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(filepath, pagesize=A4, rightMargin=72, leftMargin=72,
+                           topMargin=72, bottomMargin=18)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.black
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.black
+    )
+    
+    # Build content
+    story = []
+    
+    # Header
+    story.append(Paragraph(resume.name, title_style))
+    contact_info = f"{resume.email} • {resume.phone}"
+    story.append(Paragraph(contact_info, styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Professional Summary
+    if resume.summary:
+        story.append(Paragraph("Professional Summary", heading_style))
+        story.append(Paragraph(resume.summary, styles['Normal']))
+        story.append(Spacer(1, 15))
+    
+    # Experience
+    if resume.experience:
+        story.append(Paragraph("Experience", heading_style))
+        for exp in resume.experience:
+            # Job header
+            job_header = f"<b>{exp.title}</b> - {exp.company}"
+            story.append(Paragraph(job_header, styles['Normal']))
+            story.append(Paragraph(exp.duration, styles['Normal']))
+            story.append(Paragraph(exp.description, styles['Normal']))
+            story.append(Spacer(1, 10))
+    
+    # Education
+    if resume.education:
+        story.append(Paragraph("Education", heading_style))
+        for edu in resume.education:
+            edu_header = f"<b>{edu.degree}</b> - {edu.school}"
+            story.append(Paragraph(edu_header, styles['Normal']))
+            story.append(Paragraph(edu.year, styles['Normal']))
+            if edu.description:
+                story.append(Paragraph(edu.description, styles['Normal']))
+            story.append(Spacer(1, 10))
+    
+    # Skills
+    if resume.skills:
+        story.append(Paragraph("Skills", heading_style))
+        skills_text = " • ".join(resume.skills)
+        story.append(Paragraph(skills_text, styles['Normal']))
+    
+    # Build PDF
+    doc.build(story)
+    return filepath
+
+# API Endpoints
+
+@app.get("/")
+async def root():
+    return {"message": "Resume Editor API is running"}
+
+@app.post("/upload-resume")
+async def upload_resume(file: UploadFile = File(...)):
+    """Upload and parse resume file"""
+    try:
+        # Validate file type
+        allowed_types = ["application/pdf", "application/msword", 
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+        
+        if file.content_type not in allowed_types:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        
+        # Read file content
+        content = await file.read()
+        
+        # Parse resume (mock implementation)
+        resume = parse_resume_file(content, file.filename)
+        
+        return resume
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+@app.post("/enhance-section")
+async def enhance_section(request: EnhanceRequest):
+    """Enhance resume section with AI"""
+    try:
+        # Simulate AI processing time
+        time.sleep(random.uniform(1, 3))
+        
+        enhancer = MockAIEnhancer()
+        
+        if request.section == "summary":
+            enhanced = enhancer.enhance_summary(request.content)
+        elif request.section == "experience":
+            enhanced = enhancer.enhance_experience(request.content)
+        elif request.section == "education":
+            enhanced = enhancer.enhance_education(request.content)
+        else:
+            enhanced = request.content + " Enhanced with AI improvements."
+        
+        return EnhanceResponse(enhanced_content=enhanced)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error enhancing content: {str(e)}")
+
+@app.post("/resumes")
+async def create_resume(resume: Resume):
+    """Create new resume"""
+    try:
+        resume_id = str(uuid.uuid4())
+        resume_data = resume.dict()
+        resume_data["id"] = resume_id
+        resume_data["created_at"] = datetime.now().isoformat()
+        resume_data["updated_at"] = datetime.now().isoformat()
+        
+        resumes_db[resume_id] = resume_data
+        
+        return {"id": resume_id, "message": "Resume created successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating resume: {str(e)}")
+
+@app.get("/resumes")
+async def get_resumes():
+    """Get all saved resumes"""
+    try:
+        resumes = []
+        for resume_id, resume_data in resumes_db.items():
+            resumes.append({
+                "id": resume_id,
+                "name": resume_data.get("name", "Untitled Resume"),
+                "created_at": resume_data.get("created_at"),
+                "updated_at": resume_data.get("updated_at")
+            })
+        return resumes
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving resumes: {str(e)}")
+
+@app.get("/resumes/{resume_id}")
+async def get_resume(resume_id: str):
+    """Get specific resume by ID"""
+    try:
+        if resume_id not in resumes_db:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        resume_data = resumes_db[resume_id]
+        return Resume(**resume_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving resume: {str(e)}")
+
+@app.put("/resumes/{resume_id}")
+async def update_resume(resume_id: str, resume: Resume):
+    """Update existing resume"""
+    try:
+        if resume_id not in resumes_db:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        resume_data = resume.dict()
+        resume_data["id"] = resume_id
+        resume_data["updated_at"] = datetime.now().isoformat()
+        
+        # Preserve creation date
+        if "created_at" in resumes_db[resume_id]:
+            resume_data["created_at"] = resumes_db[resume_id]["created_at"]
+        
+        resumes_db[resume_id] = resume_data
+        
+        return {"id": resume_id, "message": "Resume updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating resume: {str(e)}")
+
+@app.delete("/resumes/{resume_id}")
+async def delete_resume(resume_id: str):
+    """Delete resume"""
+    try:
+        if resume_id not in resumes_db:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        
+        del resumes_db[resume_id]
+        
+        return {"message": "Resume deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting resume: {str(e)}")
+
+@app.post("/download-resume")
+async def download_resume(resume: Resume):
+    """Generate and download PDF resume"""
+    try:
+        # Generate PDF
+        pdf_path = generate_pdf(resume)
+        
+        # Return file for download
+        return FileResponse(
+            path=pdf_path,
+            filename=f"{resume.name.replace(' ', '_')}_resume.pdf",
+            media_type="application/pdf"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating PDF: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
+
+# Cleanup function for temporary files
+import atexit
+def cleanup_temp_files():
+    """Clean up temporary files on exit"""
+    try:
+        temp_dir = "temp"
+        if os.path.exists(temp_dir):
+            for filename in os.listdir(temp_dir):
+                file_path = os.path.join(temp_dir, filename)
+                if os.path.isfile(file_path):
+                    os.unlink(file_path)
+    except Exception as e:
+        print(f"Error cleaning up temp files: {e}")
+
+atexit.register(cleanup_temp_files)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
