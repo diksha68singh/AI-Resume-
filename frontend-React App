@@ -1,0 +1,694 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Download, Sparkles, Save, User, Briefcase, GraduationCap, Code, Plus, X, Eye, RefreshCw } from 'lucide-react';
+
+const ResumeEditor = () => {
+  const [resume, setResume] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    summary: '',
+    experience: [],
+    education: [],
+    skills: []
+  });
+  
+  const [enhancing, setEnhancing] = useState({});
+  const [savedResumes, setSavedResumes] = useState([]);
+  const [currentResumeId, setCurrentResumeId] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const fileInputRef = useRef(null);
+
+  // API Configuration
+  const API_BASE = 'http://localhost:8000';
+
+  // Load saved resumes on component mount
+  useEffect(() => {
+    loadSavedResumes();
+  }, []);
+
+  const loadSavedResumes = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/resumes`);
+      if (response.ok) {
+        const data = await response.json();
+        setSavedResumes(data);
+      }
+    } catch (error) {
+      console.error('Error loading saved resumes:', error);
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError('');
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`${API_BASE}/upload-resume`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setResume(data);
+        setError('');
+        alert('Resume uploaded and parsed successfully!');
+      } else {
+        const errorData = await response.json();
+        setError(`Upload failed: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      setError('Failed to upload resume. Please check if the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const enhanceSection = async (section, content, index = null) => {
+    const sectionKey = index !== null ? `${section}-${index}` : section;
+    setEnhancing(prev => ({ ...prev, [sectionKey]: true }));
+    
+    try {
+      const response = await fetch(`${API_BASE}/enhance-section`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          section: section,
+          content: content,
+          index: index
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.enhanced_content;
+      } else {
+        const errorData = await response.json();
+        setError(`Enhancement failed: ${errorData.detail || 'Unknown error'}`);
+        return null;
+      }
+    } catch (error) {
+      console.error('Enhancement error:', error);
+      setError('AI enhancement failed. Please check if the backend is running.');
+      return null;
+    } finally {
+      setEnhancing(prev => ({ ...prev, [sectionKey]: false }));
+    }
+  };
+
+  const handleEnhanceClick = async (section, index = null) => {
+    let content = '';
+    
+    if (section === 'summary') {
+      content = resume.summary;
+    } else if (section === 'experience' && index !== null) {
+      content = resume.experience[index].description;
+    } else if (section === 'education' && index !== null) {
+      content = resume.education[index].description;
+    }
+    
+    if (!content.trim()) {
+      alert('Please add some content before enhancing with AI.');
+      return;
+    }
+    
+    const enhanced = await enhanceSection(section, content, index);
+    
+    if (enhanced) {
+      setResume(prev => {
+        const newResume = { ...prev };
+        if (section === 'summary') {
+          newResume.summary = enhanced;
+        } else if (section === 'experience' && index !== null) {
+          newResume.experience[index].description = enhanced;
+        } else if (section === 'education' && index !== null) {
+          newResume.education[index].description = enhanced;
+        }
+        return newResume;
+      });
+      setError('');
+    }
+  };
+
+  const saveResume = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const method = currentResumeId ? 'PUT' : 'POST';
+      const url = currentResumeId ? `${API_BASE}/resumes/${currentResumeId}` : `${API_BASE}/resumes`;
+      
+      const response = await fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(resume),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentResumeId(data.id);
+        await loadSavedResumes();
+        setError('');
+        alert('Resume saved successfully!');
+      } else {
+        const errorData = await response.json();
+        setError(`Save failed: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      setError('Failed to save resume. Please check if the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadResume = async (resumeId) => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const response = await fetch(`${API_BASE}/resumes/${resumeId}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setResume(data);
+        setCurrentResumeId(resumeId);
+        setError('');
+      } else {
+        const errorData = await response.json();
+        setError(`Load failed: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Load error:', error);
+      setError('Failed to load resume. Please check if the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadResume = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const response = await fetch(`${API_BASE}/download-resume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(resume),
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${resume.name || 'resume'}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setError('');
+      } else {
+        const errorData = await response.json();
+        setError(`Download failed: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      setError('Failed to download resume. Please check if the backend is running.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addExperience = () => {
+    setResume(prev => ({
+      ...prev,
+      experience: [...prev.experience, { title: '', company: '', duration: '', description: '' }]
+    }));
+  };
+
+  const addEducation = () => {
+    setResume(prev => ({
+      ...prev,
+      education: [...prev.education, { degree: '', school: '', year: '', description: '' }]
+    }));
+  };
+
+  const addSkill = () => {
+    setResume(prev => ({
+      ...prev,
+      skills: [...prev.skills, '']
+    }));
+  };
+
+  const removeItem = (section, index) => {
+    setResume(prev => ({
+      ...prev,
+      [section]: prev[section].filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateField = (path, value) => {
+    setResume(prev => {
+      const newResume = { ...prev };
+      const keys = path.split('.');
+      let current = newResume;
+      
+      for (let i = 0; i < keys.length - 1; i++) {
+        const key = keys[i];
+        if (key.includes('[') && key.includes(']')) {
+          const arrayKey = key.split('[')[0];
+          const index = parseInt(key.split('[')[1].split(']')[0]);
+          current = current[arrayKey][index];
+        } else {
+          current = current[key];
+        }
+      }
+      
+      const lastKey = keys[keys.length - 1];
+      if (lastKey.includes('[') && lastKey.includes(']')) {
+        const arrayKey = lastKey.split('[')[0];
+        const index = parseInt(lastKey.split('[')[1].split(']')[0]);
+        current[arrayKey][index] = value;
+      } else {
+        current[lastKey] = value;
+      }
+      
+      return newResume;
+    });
+  };
+
+  const ResumePreview = () => (
+    <div className="max-w-4xl mx-auto bg-white p-8 shadow-lg">
+      <div className="text-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">{resume.name}</h1>
+        <div className="text-gray-600 mt-2">
+          {resume.email} • {resume.phone}
+        </div>
+      </div>
+      
+      {resume.summary && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Professional Summary</h2>
+          <p className="text-gray-700">{resume.summary}</p>
+        </div>
+      )}
+      
+      {resume.experience.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-3">Experience</h2>
+          {resume.experience.map((exp, index) => (
+            <div key={index} className="mb-4">
+              <div className="flex justify-between items-start">
+                <h3 className="font-medium text-gray-900">{exp.title}</h3>
+                <span className="text-gray-600 text-sm">{exp.duration}</span>
+              </div>
+              <p className="text-gray-700 font-medium">{exp.company}</p>
+              <p className="text-gray-600 mt-1">{exp.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {resume.education.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-3">Education</h2>
+          {resume.education.map((edu, index) => (
+            <div key={index} className="mb-4">
+              <div className="flex justify-between items-start">
+                <h3 className="font-medium text-gray-900">{edu.degree}</h3>
+                <span className="text-gray-600 text-sm">{edu.year}</span>
+              </div>
+              <p className="text-gray-700 font-medium">{edu.school}</p>
+              <p className="text-gray-600 mt-1">{edu.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {resume.skills.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-3">Skills</h2>
+          <div className="flex flex-wrap gap-2">
+            {resume.skills.map((skill, index) => (
+              <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                {skill}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (showPreview) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="flex justify-between items-center mb-6">
+            <h1 className="text-2xl font-bold text-gray-900">Resume Preview</h1>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowPreview(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Back to Editor
+              </button>
+              <button
+                onClick={downloadResume}
+                disabled={loading}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 disabled:opacity-50"
+              >
+                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Download size={16} />}
+                Download PDF
+              </button>
+            </div>
+          </div>
+          <ResumePreview />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-6xl mx-auto px-4">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-3xl font-bold text-gray-900">Resume Editor</h1>
+            <div className="flex gap-3">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50"
+              >
+                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
+                Upload Resume
+              </button>
+              <button
+                onClick={saveResume}
+                disabled={loading}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 disabled:opacity-50"
+              >
+                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                Save
+              </button>
+              <button
+                onClick={() => setShowPreview(true)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2"
+              >
+                <Eye size={16} />
+                Preview
+              </button>
+            </div>
+          </div>
+          
+          {/* Saved Resumes */}
+          {savedResumes.length > 0 && (
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Saved Resumes:</h3>
+              <div className="flex flex-wrap gap-2">
+                {savedResumes.map((savedResume) => (
+                  <button
+                    key={savedResume.id}
+                    onClick={() => loadResume(savedResume.id)}
+                    className={`px-3 py-1 text-sm rounded-lg ${
+                      currentResumeId === savedResume.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {savedResume.name || `Resume ${savedResume.id}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Error Display */}
+          {error && (
+            <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+              <p className="text-sm">{error}</p>
+              <p className="text-xs mt-1">Make sure the FastAPI backend is running on http://localhost:8000</p>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-6">
+          {/* Personal Information */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <User className="text-blue-600" size={20} />
+              <h2 className="text-xl font-semibold">Personal Information</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={resume.name}
+                onChange={(e) => setResume(prev => ({ ...prev, name: e.target.value }))}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="email"
+                placeholder="Email"
+                value={resume.email}
+                onChange={(e) => setResume(prev => ({ ...prev, email: e.target.value }))}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="tel"
+                placeholder="Phone Number"
+                value={resume.phone}
+                onChange={(e) => setResume(prev => ({ ...prev, phone: e.target.value }))}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          {/* Professional Summary */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold">Professional Summary</h2>
+              <button
+                onClick={() => handleEnhanceClick('summary')}
+                disabled={enhancing.summary}
+                className="px-3 py-1 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center gap-2 disabled:opacity-50"
+              >
+                {enhancing.summary ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                {enhancing.summary ? 'Enhancing...' : 'Enhance with AI'}
+              </button>
+            </div>
+            <textarea
+              placeholder="Write a brief professional summary..."
+              value={resume.summary}
+              onChange={(e) => setResume(prev => ({ ...prev, summary: e.target.value }))}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          {/* Experience */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Briefcase className="text-blue-600" size={20} />
+                <h2 className="text-xl font-semibold">Experience</h2>
+              </div>
+              <button
+                onClick={addExperience}
+                className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Add Experience
+              </button>
+            </div>
+            {resume.experience.map((exp, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg p-4 mb-4">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-medium">Experience {index + 1}</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEnhanceClick('experience', index)}
+                      disabled={enhancing[`experience-${index}`]}
+                      className="px-2 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {enhancing[`experience-${index}`] ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                      {enhancing[`experience-${index}`] ? 'Enhancing...' : 'Enhance'}
+                    </button>
+                    <button
+                      onClick={() => removeItem('experience', index)}
+                      className="px-2 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <input
+                    type="text"
+                    placeholder="Job Title"
+                    value={exp.title}
+                    onChange={(e) => updateField(`experience[${index}].title`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Company"
+                    value={exp.company}
+                    onChange={(e) => updateField(`experience[${index}].company`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Duration (e.g., 2021 - Present)"
+                    value={exp.duration}
+                    onChange={(e) => updateField(`experience[${index}].duration`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent md:col-span-2"
+                  />
+                </div>
+                <textarea
+                  placeholder="Job description and achievements..."
+                  value={exp.description}
+                  onChange={(e) => updateField(`experience[${index}].description`, e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Education */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <GraduationCap className="text-blue-600" size={20} />
+                <h2 className="text-xl font-semibold">Education</h2>
+              </div>
+              <button
+                onClick={addEducation}
+                className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Add Education
+              </button>
+            </div>
+            {resume.education.map((edu, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg p-4 mb-4">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-medium">Education {index + 1}</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEnhanceClick('education', index)}
+                      disabled={enhancing[`education-${index}`]}
+                      className="px-2 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {enhancing[`education-${index}`] ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                      {enhancing[`education-${index}`] ? 'Enhancing...' : 'Enhance'}
+                    </button>
+                    <button
+                      onClick={() => removeItem('education', index)}
+                      className="px-2 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                  <input
+                    type="text"
+                    placeholder="Degree"
+                    value={edu.degree}
+                    onChange={(e) => updateField(`education[${index}].degree`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    placeholder="School/University"
+                    value={edu.school}
+                    onChange={(e) => updateField(`education[${index}].school`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Graduation Year"
+                    value={edu.year}
+                    onChange={(e) => updateField(`education[${index}].year`, e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <textarea
+                  placeholder="Additional details, achievements, relevant coursework..."
+                  value={edu.description}
+                  onChange={(e) => updateField(`education[${index}].description`, e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Skills */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Code className="text-blue-600" size={20} />
+                <h2 className="text-xl font-semibold">Skills</h2>
+              </div>
+              <button
+                onClick={addSkill}
+                className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Add Skill
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {resume.skills.map((skill, index) => (
+                <div key={index} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Skill"
+                    value={skill}
+                    onChange={(e) => updateField(`skills[${index}]`, e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={() => removeItem('skills', index)}
+                    className="px-2 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ResumeEditor;
